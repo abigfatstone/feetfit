@@ -15,13 +15,12 @@ RUN apk add --no-cache \
     git
 
 # 复制package文件
-COPY pressure-viz-web/package.json ./
+COPY pressure-viz-web/package*.json ./
 
 # 安装依赖（开发环境包含所有依赖）
 RUN npm install --silent
 
-# 复制源代码
-COPY pressure-viz-web/ ./
+# 注意：源代码通过volume挂载，不需要在这里复制
 
 # 创建非root用户
 RUN addgroup -g 1001 -S nodejs && \

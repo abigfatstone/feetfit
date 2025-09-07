@@ -11,7 +11,8 @@ import {
   ArrowPathIcon,
   ChartBarIcon,
   EyeIcon,
-  Cog6ToothIcon
+  Cog6ToothIcon,
+  HashtagIcon
 } from '@heroicons/react/24/solid';
 
 // 类型定义
@@ -37,24 +38,23 @@ interface SensorLayouts {
   right: number[][];
 }
 
-// 动态获取API基础地址 - 优先使用环境变量中的HOST_IP
+// 动态获取API基础地址 - 使用相对路径支持ngrok
 const getApiBase = () => {
   if (typeof window !== 'undefined') {
-    // 浏览器端：优先使用环境变量中的HOST_IP，否则使用当前主机
-    const hostIp = process.env.NEXT_PUBLIC_HOST_IP;
+    // 浏览器端：使用相对路径，这样可以通过nginx代理访问
     const protocol = window.location.protocol;
+    const hostname = window.location.hostname;
+    const port = window.location.port;
     
-    let hostname;
-    if (hostIp && hostIp !== 'localhost') {
-      hostname = hostIp;
-      console.log('🌐 使用启动脚本设置的HOST_IP:', hostIp);
-    } else {
-      hostname = window.location.hostname;
-      console.log('🌐 使用当前页面hostname:', hostname);
+    // 如果是通过ngrok访问，使用相对路径
+    if (hostname.includes('ngrok') || hostname.includes('ngrok-free.app')) {
+      console.log('🌐 检测到ngrok访问，使用相对路径');
+      return ''; // 空字符串表示相对路径
     }
     
-    const apiBase = `${protocol}//${hostname}:3080`;
-    console.log('🚀 最终API地址:', apiBase);
+    // 本地开发环境
+    const apiBase = port ? `${protocol}//${hostname}:3080` : `${protocol}//${hostname}:3080`;
+    console.log('🚀 本地开发API地址:', apiBase);
     return apiBase;
   }
   // 服务端：使用环境变量
@@ -67,7 +67,7 @@ const PressureVisualization: React.FC = () => {
   // 状态管理
   const [sensorLayouts, setSensorLayouts] = useState<SensorLayouts | null>(null);
   const [dataOptions, setDataOptions] = useState<DataOption[]>([]);
-  const [apiBase, setApiBase] = useState<string>('');
+  const [apiBase, setApiBase] = useState<string | null>(null);
   const [selectedOption, setSelectedOption] = useState({
     subject: 'h',
     activity: 'walk',
@@ -80,33 +80,22 @@ const PressureVisualization: React.FC = () => {
   const [maxPressure, setMaxPressure] = useState(100);
   const [viewMode, setViewMode] = useState<'2d' | '3d'>('2d');
   const [showStats, setShowStats] = useState(false);
+  const [showValues, setShowValues] = useState(true); // 控制是否显示具体数值
   const [loading, setLoading] = useState(true);
+  const [loadingProgress, setLoadingProgress] = useState<string>('');
 
   // 初始化API地址
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      // 优先使用环境变量中的HOST_IP
-      const hostIp = process.env.NEXT_PUBLIC_HOST_IP;
-      const protocol = window.location.protocol;
-      
-      let hostname;
-      if (hostIp && hostIp !== 'localhost') {
-        hostname = hostIp;
-        console.log('🌐 使用启动脚本设置的HOST_IP:', hostIp);
-      } else {
-        hostname = window.location.hostname;
-        console.log('🌐 使用当前页面hostname:', hostname);
-      }
-      
-      const dynamicApiBase = `${protocol}//${hostname}:3080`;
-      console.log('🚀 设置API地址:', dynamicApiBase);
+      const dynamicApiBase = getApiBase();
+      console.log('🚀 设置API地址:', dynamicApiBase || '相对路径');
       setApiBase(dynamicApiBase);
     }
   }, []);
 
   // 获取传感器布局
   useEffect(() => {
-    if (!apiBase) return;
+    if (apiBase === null) return;
     
     const fetchLayout = async () => {
       try {
@@ -128,7 +117,7 @@ const PressureVisualization: React.FC = () => {
 
   // 获取数据选项
   useEffect(() => {
-    if (!apiBase) return;
+    if (apiBase === null) return;
     
     const fetchDataOptions = async () => {
       try {
@@ -152,18 +141,29 @@ const PressureVisualization: React.FC = () => {
 
   // 获取压力数据流
   const fetchPressureStream = useCallback(async () => {
-    if (!apiBase) return;
+    if (apiBase === null) return;
     
     setLoading(true);
     try {
-      console.log('请求压力数据:', `${apiBase}/api/pressure-stream`);
+      // 先获取当前选择数据集的总数量
+      const currentDataOption = dataOptions.find(option => 
+        option.subject === selectedOption.subject &&
+        option.activity === selectedOption.activity &&
+        option.trial_number === selectedOption.trial
+      );
+      
+      const totalCount = currentDataOption?.data_count || 1000; // 默认1000帧，如果找不到就用较大的数
+      
+      console.log('请求压力数据:', `${apiBase}/api/pressure-stream`, '总帧数:', totalCount);
+      setLoadingProgress(`正在加载 ${totalCount} 帧数据...`);
+      
       const response = await axios.get(`${apiBase}/api/pressure-stream`, {
         params: {
           subject: selectedOption.subject,
           activity: selectedOption.activity,
           trial: selectedOption.trial,
           start_index: 0,
-          count: 50
+          count: totalCount // 加载全部数据
         }
       });
       
@@ -183,8 +183,10 @@ const PressureVisualization: React.FC = () => {
       
     } catch (error) {
       console.error('获取压力数据失败:', error);
+      setLoadingProgress('加载失败');
     } finally {
       setLoading(false);
+      setLoadingProgress('');
     }
   }, [selectedOption, apiBase]);
 
@@ -244,9 +246,9 @@ const PressureVisualization: React.FC = () => {
     return (
       <motion.div 
         className={`relative p-6 lg:p-10 rounded-[2rem] bg-gradient-to-br from-white/95 via-slate-50/90 to-blue-50/80 backdrop-blur-2xl border border-slate-200/50 shadow-[0_32px_64px_-12px_rgba(0,0,0,0.12)] w-full max-w-2xl`}
-        initial={{ opacity: 0, scale: 0.95, y: 30 }}
-        animate={{ opacity: 1, scale: 1, y: 0 }}
-        transition={{ duration: 0.6, delay: side === 'left' ? 0 : 0.15, ease: "easeOut" }}
+        initial={!isPlaying ? { opacity: 0, scale: 0.95, y: 30 } : false}
+        animate={!isPlaying ? { opacity: 1, scale: 1, y: 0 } : false}
+        transition={!isPlaying ? { duration: 0.6, delay: side === 'left' ? 0 : 0.15, ease: "easeOut" } : { duration: 0 }}
         style={{
           boxShadow: '0 32px 64px -12px rgba(0, 0, 0, 0.12), 0 0 0 1px rgba(148, 163, 184, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.6)'
         }}
@@ -255,9 +257,9 @@ const PressureVisualization: React.FC = () => {
         <div className="text-center mb-10">
           <motion.h3 
             className="text-4xl font-black text-transparent bg-clip-text bg-gradient-to-r from-slate-800 via-blue-600 to-indigo-600 mb-4"
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: side === 'left' ? 0.3 : 0.45 }}
+            initial={!isPlaying ? { opacity: 0, y: 10 } : false}
+            animate={!isPlaying ? { opacity: 1, y: 0 } : false}
+            transition={!isPlaying ? { delay: side === 'left' ? 0.3 : 0.45 } : { duration: 0 }}
           >
             {side === 'left' ? '🦶 LEFT FOOT' : 'RIGHT FOOT 🦶'}
           </motion.h3>
@@ -271,9 +273,9 @@ const PressureVisualization: React.FC = () => {
             <motion.div 
               key={rowIndex} 
               className="flex justify-center gap-4 lg:gap-6"
-              initial={{ opacity: 0, x: side === 'left' ? -20 : 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: 0.5 + rowIndex * 0.05 }}
+              initial={!isPlaying ? { opacity: 0, x: side === 'left' ? -20 : 20 } : false}
+              animate={!isPlaying ? { opacity: 1, x: 0 } : false}
+              transition={!isPlaying ? { delay: 0.5 + rowIndex * 0.05 } : { duration: 0 }}
             >
               {row.map((sensorId) => {
                 const pressure = pressureData[sensorId] || 0;
@@ -285,7 +287,7 @@ const PressureVisualization: React.FC = () => {
                     key={`${sensorId}-${currentFrame}`}
                     className={`
                       group relative w-12 h-12 lg:w-16 lg:h-16 rounded-2xl border-2 cursor-pointer
-                      transition-all duration-300 hover:scale-125 hover:z-20 hover:rotate-3
+                      ${!isPlaying ? 'transition-all duration-300 hover:scale-125 hover:z-20 hover:rotate-3' : 'transition-colors duration-100'}
                       ${level === 'critical' ? 'border-red-400 shadow-2xl shadow-red-300/50' : 
                         level === 'high' ? 'border-orange-400 shadow-2xl shadow-orange-300/50' :
                         level === 'medium' ? 'border-blue-400 shadow-2xl shadow-blue-300/50' : 'border-slate-300 shadow-xl shadow-slate-300/30'}
@@ -294,31 +296,44 @@ const PressureVisualization: React.FC = () => {
                       backgroundColor: color,
                       boxShadow: pressure > 0 ? 
                         `0 20px 40px -8px ${color}, 0 0 0 1px rgba(148, 163, 184, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.2)` : 
-                        '0 12px 24px -6px rgba(148, 163, 184, 0.15), 0 0 0 1px rgba(148, 163, 184, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.6)'
-                    }}
-                    initial={{ scale: 0.3, opacity: 0 }}
-                    animate={{ 
-                      scale: 1 + (pressure / maxPressure) * 0.15,
+                        '0 12px 24px -6px rgba(148, 163, 184, 0.15), 0 0 0 1px rgba(148, 163, 184, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.6)',
+                      transform: isPlaying ? 'none' : `scale(${1 + (pressure / maxPressure) * 0.15})`,
                       opacity: 0.95 + (pressure / maxPressure) * 0.05
                     }}
-                    transition={{ 
+                    initial={!isPlaying ? { scale: 0.3, opacity: 0 } : false}
+                    animate={!isPlaying ? { 
+                      scale: 1 + (pressure / maxPressure) * 0.15,
+                      opacity: 0.95 + (pressure / maxPressure) * 0.05
+                    } : false}
+                    transition={!isPlaying ? { 
                       duration: 0.4,
                       type: "spring",
                       stiffness: 200,
                       damping: 15
-                    }}
-                    whileHover={{ 
+                    } : { duration: 0 }}
+                    whileHover={!isPlaying ? { 
                       scale: 1.3,
                       rotate: 8,
                       zIndex: 100,
                       transition: { duration: 0.2 }
-                    }}
+                    } : {}}
                   >
-                    {/* 传感器编号 */}
-                    <div className="absolute inset-0 flex items-center justify-center">
-                      <span className="text-sm lg:text-base font-black text-slate-700 drop-shadow-sm group-hover:text-slate-800 transition-colors">
-                        {sensorId}
-                      </span>
+                    {/* 传感器编号和数值 */}
+                    <div className="absolute inset-0 flex flex-col items-center justify-center p-1">
+                      {showValues ? (
+                        <>
+                          <span className="text-xs font-bold text-slate-600 leading-none">
+                            {sensorId}
+                          </span>
+                          <span className="text-xs lg:text-sm font-black text-slate-800 drop-shadow-sm leading-none mt-0.5">
+                            {pressure.toFixed(1)}
+                          </span>
+                        </>
+                      ) : (
+                        <span className="text-sm lg:text-base font-black text-slate-700 drop-shadow-sm group-hover:text-slate-800 transition-colors">
+                          {sensorId}
+                        </span>
+                      )}
                     </div>
                     
                     {/* 悬浮信息卡片 */}
@@ -375,9 +390,9 @@ const PressureVisualization: React.FC = () => {
         {/* 脚部统计信息 */}
         <motion.div 
           className="mt-10 p-4 bg-white/40 backdrop-blur-sm rounded-xl border border-white/50"
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 1 }}
+          initial={!isPlaying ? { opacity: 0, y: 20 } : false}
+          animate={!isPlaying ? { opacity: 1, y: 0 } : false}
+          transition={!isPlaying ? { delay: 1 } : { duration: 0 }}
         >
           <div className="grid grid-cols-3 gap-4 text-center">
             <div>
@@ -498,6 +513,21 @@ const PressureVisualization: React.FC = () => {
           whileTap={{ scale: 0.95 }}
         >
           <ForwardIcon className="w-7 h-7 group-hover:scale-110 transition-transform" />
+        </motion.button>
+        
+        {/* 数值显示切换按钮 */}
+        <motion.button 
+          onClick={() => setShowValues(!showValues)}
+          className={`group p-5 rounded-2xl transition-all shadow-2xl text-white border-2 ${
+            showValues 
+              ? 'bg-gradient-to-br from-green-500 to-emerald-600 hover:from-green-400 hover:to-emerald-500 border-green-400/50' 
+              : 'bg-gradient-to-br from-gray-500 to-gray-600 hover:from-gray-400 hover:to-gray-500 border-gray-400/50'
+          }`}
+          whileHover={{ scale: 1.05 }}
+          whileTap={{ scale: 0.95 }}
+          title={showValues ? "隐藏数值" : "显示数值"}
+        >
+          <HashtagIcon className="w-7 h-7 group-hover:scale-110 transition-transform" />
         </motion.button>
       </div>
       
@@ -624,7 +654,7 @@ const PressureVisualization: React.FC = () => {
             animate={{ opacity: 1 }}
             transition={{ delay: 0.7 }}
           >
-            请耐心等待，我们正在为您构建高端可视化体验
+            {loadingProgress || "请耐心等待，我们正在为您构建高端可视化体验"}
           </motion.p>
         </motion.div>
       </div>
@@ -686,19 +716,28 @@ const PressureVisualization: React.FC = () => {
       
       {/* 可视化容器 - 左右脚并排显示 */}
       <div className="w-full mx-auto px-4 lg:px-6 pb-12">
-        <AnimatePresence mode="wait">
-          <motion.div
-            key={currentFrame}
-            className="grid grid-cols-1 lg:grid-cols-2 gap-8 lg:gap-12 justify-items-center items-start max-w-none"
-            initial={{ opacity: 0, y: 40 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -20 }}
-            transition={{ duration: 0.5, ease: "easeOut" }}
-          >
+        {isPlaying ? (
+          // 播放时：无动画，直接渲染
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 lg:gap-12 justify-items-center items-start max-w-none">
             {renderFoot(sensorLayouts.left, currentData.left, 'left')}
             {renderFoot(sensorLayouts.right, currentData.right, 'right')}
-          </motion.div>
-        </AnimatePresence>
+          </div>
+        ) : (
+          // 暂停时：保留动画效果
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={currentFrame}
+              className="grid grid-cols-1 lg:grid-cols-2 gap-8 lg:gap-12 justify-items-center items-start max-w-none"
+              initial={{ opacity: 0, y: 40 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+              transition={{ duration: 0.5, ease: "easeOut" }}
+            >
+              {renderFoot(sensorLayouts.left, currentData.left, 'left')}
+              {renderFoot(sensorLayouts.right, currentData.right, 'right')}
+            </motion.div>
+          </AnimatePresence>
+        )}
       </div>
       
       {/* 压力图例和统计 */}
