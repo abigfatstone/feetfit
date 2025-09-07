@@ -1,8 +1,13 @@
 
-pg_host_core: "localhost"
+# 数据库配置 - Docker环境
+pg_host_core: "db"
 pg_read_host_core: "db"
 pg_port_core: 5432
 pg_user_core: "holistic_user"
 pg_dbname_core: "holistic_db"
 pg_schema_core: "theta_ai"
 pg_encryption_key: "61df425f-2e57-4798-96be-bb2ac3cebba4"
+
+# 本地开发配置（宿主机访问）
+pg_host_local: "localhost"
+pg_port_local: 15432

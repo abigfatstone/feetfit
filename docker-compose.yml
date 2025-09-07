@@ -1,172 +1,115 @@
 version: '3.8'
 
+x-common: &common
+  restart: unless-stopped
+  logging:
+    driver: "json-file"
+    options:
+      max-size: "10m"
+      max-file: "3"
+
 services:
   # PostgreSQL数据库服务
   db:
     build:
       context: ./docker/postgres
       dockerfile: Dockerfile
-    container_name: feetfit_postgres
-    restart: unless-stopped
-    environment:
-      POSTGRES_DB: holistic_db
-      POSTGRES_USER: holistic_user
-      POSTGRES_PASSWORD: holistic_password
-      PGDATA: /var/lib/postgresql/data/pgdata
+    container_name: feetfit_db
+    <<: *common
     ports:
-      - "5432:5432"
+      - "15432:5432"
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "holistic_user", "-d", "holistic_db"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - postgres_logs:/var/log/postgresql
       - ./docker/postgres/init-scripts:/docker-entrypoint-initdb.d
+      - .:/app
+      - /etc/localtime:/etc/localtime:ro
     networks:
       - feetfit_network
+    environment:
+      - POSTGRES_USER=holistic_user
+      - POSTGRES_PASSWORD=holistic_password
+      - POSTGRES_DB=holistic_db
+      - TZ=Asia/Shanghai
+      - ENV=${ENV:-development}
+
+  # 后端API服务
+  backend:
+    build:
+      context: .
+      dockerfile: docker/backend/Dockerfile
+    container_name: feetfit_backend
+    <<: *common
+    ports:
+      - "3080:3080"
+    depends_on:
+      db:
+        condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U holistic_user -d holistic_db"]
+      test: ["CMD", "curl", "-f", "http://localhost:3080/health"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 40s
-
-  # Redis缓存服务
-  redis:
-    image: redis:7.0-alpine
-    container_name: feetfit_redis
-    restart: unless-stopped
-    ports:
-      - "6379:6379"
-      - "6380:6380"
     volumes:
-      - redis_data:/data
-      - ./docker/redis/redis.conf:/usr/local/etc/redis/redis.conf
-    command: redis-server /usr/local/etc/redis/redis.conf
+      - .:/app
+      - ./logs:/app/logs
     networks:
       - feetfit_network
+    environment:
+      - PYTHONPATH=/app
+      - ENV=${ENV:-development}
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_USER=holistic_user
+      - DB_PASSWORD=holistic_password
+      - DB_NAME=holistic_db
+
+  # 前端Web服务
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/frontend/Dockerfile
+    container_name: feetfit_frontend
+    <<: *common
+    ports:
+      - "3060:3060"
+    depends_on:
+      backend:
+        condition: service_healthy
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "curl", "-f", "http://localhost:3060"]
       interval: 30s
       timeout: 10s
       retries: 3
-
-  # pgAdmin管理界面
-  pgadmin:
-    image: dpage/pgadmin4:latest
-    container_name: feetfit_pgadmin
-    restart: unless-stopped
+      start_period: 60s
+    volumes:
+      - ./pressure-viz-web:/app
+      - /app/node_modules
+      - /app/.next
+    networks:
+      - feetfit_network
     environment:
-      PGADMIN_DEFAULT_EMAIL: admin@feetfit.com
-      PGADMIN_DEFAULT_PASSWORD: admin123
-      PGADMIN_CONFIG_SERVER_MODE: 'False'
-    ports:
-      - "8080:80"
-    volumes:
-      - pgadmin_data:/var/lib/pgadmin
-    networks:
-      - feetfit_network
-    depends_on:
-      - db
+      - NODE_ENV=development
+      - NEXT_TELEMETRY_DISABLED=1
+      - NEXT_PUBLIC_API_URL=http://localhost:3080
 
-  # 应用服务（Python后端）
-  app:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: feetfit_app
-    restart: unless-stopped
-    environment:
-      - DATABASE_URL=postgresql://holistic_user:holistic_password@db:5432/holistic_db
-      - REDIS_URL=redis://redis:6379
-      - ENV=production
-    ports:
-      - "8000:8000"
-    volumes:
-      - ./:/app
-      - app_logs:/app/logs
-    networks:
-      - feetfit_network
-    depends_on:
-      db:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    command: ["python", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
-
-  # Nginx反向代理
-  nginx:
-    image: nginx:alpine
-    container_name: feetfit_nginx
-    restart: unless-stopped
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./docker/nginx/nginx.conf:/etc/nginx/nginx.conf
-      - ./docker/nginx/ssl:/etc/nginx/ssl
-      - nginx_logs:/var/log/nginx
-    networks:
-      - feetfit_network
-    depends_on:
-      - app
-
-  # 监控服务 - Prometheus
-  prometheus:
-    image: prom/prometheus:latest
-    container_name: feetfit_prometheus
-    restart: unless-stopped
-    ports:
-      - "9090:9090"
-    volumes:
-      - ./docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
-      - prometheus_data:/prometheus
-    networks:
-      - feetfit_network
-    command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--storage.tsdb.path=/prometheus'
-      - '--web.console.libraries=/etc/prometheus/console_libraries'
-      - '--web.console.templates=/etc/prometheus/consoles'
-
-  # 监控服务 - Grafana
-  grafana:
-    image: grafana/grafana:latest
-    container_name: feetfit_grafana
-    restart: unless-stopped
-    ports:
-      - "3000:3000"
-    environment:
-      - GF_SECURITY_ADMIN_PASSWORD=admin123
-    volumes:
-      - grafana_data:/var/lib/grafana
-      - ./docker/grafana/dashboards:/etc/grafana/provisioning/dashboards
-      - ./docker/grafana/datasources:/etc/grafana/provisioning/datasources
-    networks:
-      - feetfit_network
-    depends_on:
-      - prometheus
-
-# 网络配置
 networks:
   feetfit_network:
     driver: bridge
     ipam:
+      driver: default
       config:
-        - subnet: 172.20.0.0/16
+        - subnet: 172.29.0.0/16
+          gateway: 172.29.0.1
 
-# 数据卷配置
 volumes:
   postgres_data:
     driver: local
-  postgres_logs:
-    driver: local
-  redis_data:
-    driver: local
-  pgadmin_data:
-    driver: local
-  app_logs:
-    driver: local
-  nginx_logs:
-    driver: local
-  prometheus_data:
-    driver: local
-  grafana_data:
+  node_modules:
     driver: local

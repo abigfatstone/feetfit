@@ -18,11 +18,11 @@ from config.config import safe_read_cfg
 from utils.logger import log_setter
 
 DB_CONFIG = {
-    "pg_host": safe_read_cfg("pg_host"),
-    "pg_port": safe_read_cfg("pg_port"),
-    "pg_user": safe_read_cfg("pg_user"),
+    "pg_host": safe_read_cfg("pg_host_core"),
+    "pg_port": safe_read_cfg("pg_port_core"),
+    "pg_user": safe_read_cfg("pg_user_core"),
     "pg_password": safe_read_cfg("pg_password"),
-    "pg_dbname": safe_read_cfg("pg_dbname"),
+    "pg_dbname": safe_read_cfg("pg_dbname_core"),
     "encryption_key": safe_read_cfg("pg_encryption_key"),
 }
 
