@@ -14,6 +14,10 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from utils.utils_db import execute_query_sync, DB_CONFIG
+import os
+
+# 设置环境变量以使用本地数据库配置
+os.environ['USE_LOCAL_DB'] = 'true'
 
 
 def extract_metadata_from_filename(filename: str) -> Dict[str, Optional[str]]:

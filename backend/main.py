@@ -19,18 +19,22 @@ import json
 # 获取后端目录路径
 backend_dir = os.path.dirname(os.path.abspath(__file__))
 project_dir = os.path.dirname(backend_dir)
-project_name = "pressure-viz-web"
+project_name = "feetfit"
 log_dir = os.path.join(project_dir, "logs")
 
-# 添加父目录到路径以导入utils
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
+# 添加项目根目录到路径以导入utils
+sys.path.append(project_dir)
 
 try:
     from utils.utils_db import execute_query_sync, DB_CONFIG
     from utils.logger import startup_logger
     
-    # 初始化日志系统
-    startup_logger(True, False, project_dir, project_name, project_name, log_dir)
+    # 在Docker环境中跳过日志系统初始化以避免权限问题
+    if os.getenv("ENV") != "development" or os.path.exists("/.dockerenv"):
+        print("Docker环境检测到，跳过日志系统初始化")
+    else:
+        # 初始化日志系统
+        startup_logger(True, False, project_dir, project_name, project_name, log_dir)
     
 except ImportError:
     print("警告: 无法导入utils_db或logger，使用备用配置")
@@ -51,11 +55,11 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# 配置CORS
+# 配置CORS - 允许所有来源以支持局域网访问
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3060", "http://127.0.0.1:3060"],
-    allow_credentials=True,
+    allow_origins=["*"],  # 允许所有来源
+    allow_credentials=False,  # 当allow_origins为*时，必须设置为False
     allow_methods=["*"],
     allow_headers=["*"],
 )

@@ -37,12 +37,37 @@ interface SensorLayouts {
   right: number[][];
 }
 
-const API_BASE = 'http://localhost:3080';
+// 动态获取API基础地址 - 优先使用环境变量中的HOST_IP
+const getApiBase = () => {
+  if (typeof window !== 'undefined') {
+    // 浏览器端：优先使用环境变量中的HOST_IP，否则使用当前主机
+    const hostIp = process.env.NEXT_PUBLIC_HOST_IP;
+    const protocol = window.location.protocol;
+    
+    let hostname;
+    if (hostIp && hostIp !== 'localhost') {
+      hostname = hostIp;
+      console.log('🌐 使用启动脚本设置的HOST_IP:', hostIp);
+    } else {
+      hostname = window.location.hostname;
+      console.log('🌐 使用当前页面hostname:', hostname);
+    }
+    
+    const apiBase = `${protocol}//${hostname}:3080`;
+    console.log('🚀 最终API地址:', apiBase);
+    return apiBase;
+  }
+  // 服务端：使用环境变量
+  const serverApiBase = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3080';
+  console.log('🖥️ 服务端API地址:', serverApiBase);
+  return serverApiBase;
+};
 
 const PressureVisualization: React.FC = () => {
   // 状态管理
   const [sensorLayouts, setSensorLayouts] = useState<SensorLayouts | null>(null);
   const [dataOptions, setDataOptions] = useState<DataOption[]>([]);
+  const [apiBase, setApiBase] = useState<string>('');
   const [selectedOption, setSelectedOption] = useState({
     subject: 'h',
     activity: 'walk',
@@ -57,37 +82,82 @@ const PressureVisualization: React.FC = () => {
   const [showStats, setShowStats] = useState(false);
   const [loading, setLoading] = useState(true);
 
+  // 初始化API地址
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      // 优先使用环境变量中的HOST_IP
+      const hostIp = process.env.NEXT_PUBLIC_HOST_IP;
+      const protocol = window.location.protocol;
+      
+      let hostname;
+      if (hostIp && hostIp !== 'localhost') {
+        hostname = hostIp;
+        console.log('🌐 使用启动脚本设置的HOST_IP:', hostIp);
+      } else {
+        hostname = window.location.hostname;
+        console.log('🌐 使用当前页面hostname:', hostname);
+      }
+      
+      const dynamicApiBase = `${protocol}//${hostname}:3080`;
+      console.log('🚀 设置API地址:', dynamicApiBase);
+      setApiBase(dynamicApiBase);
+    }
+  }, []);
+
   // 获取传感器布局
   useEffect(() => {
+    if (!apiBase) return;
+    
     const fetchLayout = async () => {
       try {
-        const response = await axios.get(`${API_BASE}/api/sensor-layout`);
+        console.log('📡 请求传感器布局:', `${apiBase}/api/sensor-layout`);
+        const response = await axios.get(`${apiBase}/api/sensor-layout`);
         setSensorLayouts(response.data);
+        console.log('✅ 传感器布局获取成功');
       } catch (error) {
-        console.error('获取传感器布局失败:', error);
+        console.error('❌ 获取传感器布局失败:', error);
+        // 设置默认布局以防止卡在加载状态
+        setSensorLayouts({
+          left: [[1,2,3,4,5,6,7,8]],
+          right: [[1,2,3,4,5,6,7,8]]
+        });
       }
     };
     fetchLayout();
-  }, []);
+  }, [apiBase]);
 
   // 获取数据选项
   useEffect(() => {
+    if (!apiBase) return;
+    
     const fetchDataOptions = async () => {
       try {
-        const response = await axios.get(`${API_BASE}/api/data-options`);
+        console.log('📡 请求数据选项:', `${apiBase}/api/data-options`);
+        const response = await axios.get(`${apiBase}/api/data-options`);
         setDataOptions(response.data);
+        console.log('✅ 数据选项获取成功，共', response.data.length, '个选项');
       } catch (error) {
-        console.error('获取数据选项失败:', error);
+        console.error('❌ 获取数据选项失败:', error);
+        // 设置默认选项以防止卡在加载状态
+        setDataOptions([{
+          subject: 'h',
+          activity: 'walk', 
+          trial_number: 1,
+          data_count: 100
+        }]);
       }
     };
     fetchDataOptions();
-  }, []);
+  }, [apiBase]);
 
   // 获取压力数据流
   const fetchPressureStream = useCallback(async () => {
+    if (!apiBase) return;
+    
     setLoading(true);
     try {
-      const response = await axios.get(`${API_BASE}/api/pressure-stream`, {
+      console.log('请求压力数据:', `${apiBase}/api/pressure-stream`);
+      const response = await axios.get(`${apiBase}/api/pressure-stream`, {
         params: {
           subject: selectedOption.subject,
           activity: selectedOption.activity,
@@ -98,6 +168,7 @@ const PressureVisualization: React.FC = () => {
       });
       
       const data = response.data;
+      console.log('✅ 压力数据获取成功，共', data.length, '帧数据');
       setStreamData(data);
       setCurrentFrame(0);
       
@@ -108,13 +179,14 @@ const PressureVisualization: React.FC = () => {
         Object.values(frame.right).forEach(val => maxVal = Math.max(maxVal, val));
       });
       setMaxPressure(maxVal || 100);
+      console.log('📊 最大压力值:', maxVal);
       
     } catch (error) {
       console.error('获取压力数据失败:', error);
     } finally {
       setLoading(false);
     }
-  }, [selectedOption]);
+  }, [selectedOption, apiBase]);
 
   // 当选项改变时重新获取数据
   useEffect(() => {

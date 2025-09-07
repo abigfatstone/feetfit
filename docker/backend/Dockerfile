@@ -18,15 +18,16 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # 复制requirements文件并安装Python依赖
-COPY pressure-viz-web/backend/requirements.txt /tmp/requirements.txt
+COPY backend/requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir -r /tmp/requirements.txt
 
 # 创建非root用户
 RUN groupadd -r appuser && useradd -r -g appuser appuser
 
-# 创建必要的目录
+# 创建必要的目录并设置权限
 RUN mkdir -p /app/logs && \
-    chown -R appuser:appuser /app
+    chown -R appuser:appuser /app && \
+    chmod -R 755 /app/logs
 
 # 暴露端口
 EXPOSE 3080
@@ -39,4 +40,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:3080/health || exit 1
 
 # 启动命令
-CMD ["python", "pressure-viz-web/backend/main.py"]
+CMD ["python", "backend/main.py"]

@@ -39,11 +39,77 @@ check_docker() {
 
 # 检查docker-compose是否可用
 check_docker_compose() {
-    if ! command -v docker-compose > /dev/null 2>&1; then
-        log_error "docker-compose未安装，请先安装docker-compose"
+    if ! docker compose version > /dev/null 2>&1; then
+        log_error "docker compose未安装，请先安装Docker Compose"
         exit 1
     fi
-    log_success "docker-compose可用"
+    log_success "docker compose可用"
+}
+
+# 获取主机IP地址
+get_host_ip() {
+    # 尝试多种方法获取主机IP
+    local host_ip=""
+    
+    # 方法1: 通过路由表获取主要IP
+    if command -v ip >/dev/null 2>&1; then
+        host_ip=$(ip route get 1.1.1.1 2>/dev/null | grep -oP 'src \K\S+' | head -1)
+    fi
+    
+    # 方法2: 如果方法1失败，尝试hostname -I
+    if [[ -z "$host_ip" ]] && command -v hostname >/dev/null 2>&1; then
+        host_ip=$(hostname -I | awk '{print $1}')
+    fi
+    
+    # 方法3: 如果都失败，使用默认值
+    if [[ -z "$host_ip" ]]; then
+        host_ip="localhost"
+        log_warning "无法自动检测IP地址，使用默认值: localhost"
+    else
+        log_success "检测到主机IP地址: $host_ip"
+    fi
+    
+    echo "$host_ip"
+}
+
+# 设置环境变量
+setup_environment() {
+    log_info "设置环境变量..."
+    
+    local host_ip=$(get_host_ip)
+    
+    # 只有在.env文件不存在或HOST_IP不正确时才更新
+    if [[ ! -f .env ]] || ! grep -q "^HOST_IP=$host_ip$" .env 2>/dev/null; then
+        # 备份现有的.env文件
+        if [[ -f .env ]]; then
+            cp .env .env.backup.$(date +%Y%m%d_%H%M%S)
+            log_info "已备份现有.env文件"
+        fi
+        
+        # 创建新的.env文件，保留现有的CONFIG_ENCRYPTION_KEY
+        local existing_key=""
+        if [[ -f .env ]] && grep -q "^CONFIG_ENCRYPTION_KEY=" .env; then
+            existing_key=$(grep "^CONFIG_ENCRYPTION_KEY=" .env | cut -d'=' -f2)
+        else
+            existing_key="HolyWellWillWin"
+        fi
+        
+        cat > .env << EOF
+# 主机IP地址 - 由启动脚本自动检测
+HOST_IP=$host_ip
+
+# 配置加密密钥
+CONFIG_ENCRYPTION_KEY=$existing_key
+
+# 环境配置
+ENV=localdb
+EOF
+        log_info "已更新.env文件中的HOST_IP"
+    else
+        log_info "HOST_IP已是正确值，跳过更新"
+    fi
+    
+    log_success "环境变量设置完成: HOST_IP=$host_ip"
 }
 
 # 创建必要的目录
@@ -57,14 +123,14 @@ create_directories() {
 # 停止并清理现有容器
 cleanup_containers() {
     log_info "停止并清理现有容器..."
-    docker-compose down --remove-orphans
+    docker compose down --remove-orphans
     log_success "容器清理完成"
 }
 
 # 构建并启动服务
 start_services() {
     log_info "构建并启动服务..."
-    docker-compose up --build -d
+    docker compose up --build -d
     
     # 等待服务启动
     log_info "等待服务启动..."
@@ -79,7 +145,7 @@ check_services_health() {
     log_info "检查服务健康状态..."
     
     # 检查数据库
-    if docker-compose exec -T db pg_isready -U holistic_user -d holistic_db > /dev/null 2>&1; then
+    if docker compose exec -T db pg_isready -U holistic_user -d holistic_db > /dev/null 2>&1; then
         log_success "数据库服务正常"
     else
         log_warning "数据库服务未就绪，请稍后检查"
@@ -126,10 +192,10 @@ show_service_info() {
     echo "   - pressure-viz-web -> 前端容器:/app"
     echo ""
     echo "📋 常用命令:"
-    echo "   - 查看日志: docker-compose logs -f [service_name]"
-    echo "   - 停止服务: docker-compose down"
-    echo "   - 重启服务: docker-compose restart [service_name]"
-    echo "   - 进入容器: docker-compose exec [service_name] bash"
+    echo "   - 查看日志: docker compose logs -f [service_name]"
+    echo "   - 停止服务: docker compose down"
+    echo "   - 重启服务: docker compose restart [service_name]"
+    echo "   - 进入容器: docker compose exec [service_name] bash"
     echo ""
 }
 
@@ -157,6 +223,7 @@ main() {
             log_info "启动足底压力可视化系统..."
             check_docker
             check_docker_compose
+            setup_environment
             create_directories
             cleanup_containers
             start_services
@@ -164,26 +231,26 @@ main() {
             ;;
         stop)
             log_info "停止足底压力可视化系统..."
-            docker-compose down
+            docker compose down
             log_success "系统已停止"
             ;;
         restart)
             log_info "重启足底压力可视化系统..."
-            docker-compose restart
+            docker compose restart
             log_success "系统已重启"
             ;;
         logs)
-            docker-compose logs -f
+            docker compose logs -f
             ;;
         status)
-            docker-compose ps
+            docker compose ps
             ;;
         clean)
             log_warning "这将删除所有容器、镜像和数据卷！"
             read -p "确认继续？(y/N): " -n 1 -r
             echo
             if [[ $REPLY =~ ^[Yy]$ ]]; then
-                docker-compose down -v --rmi all
+                docker compose down -v --rmi all
                 log_success "清理完成"
             else
                 log_info "取消清理操作"

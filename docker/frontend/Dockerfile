@@ -1,4 +1,4 @@
-# 足底压力可视化前端Dockerfile
+# 足底压力可视化前端Dockerfile - 开发环境
 FROM node:18-alpine
 
 # 设置工作目录
@@ -11,13 +11,17 @@ ENV NEXT_TELEMETRY_DISABLED=1
 # 安装系统依赖
 RUN apk add --no-cache \
     libc6-compat \
-    curl
+    curl \
+    git
 
 # 复制package文件
-COPY pressure-viz-web/package*.json ./
+COPY pressure-viz-web/package.json ./
 
-# 安装依赖
-RUN npm ci --only=production --silent
+# 安装依赖（开发环境包含所有依赖）
+RUN npm install --silent
+
+# 复制源代码
+COPY pressure-viz-web/ ./
 
 # 创建非root用户
 RUN addgroup -g 1001 -S nodejs && \
