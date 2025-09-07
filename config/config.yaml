@@ -1,0 +1,8 @@
+
+pg_host_core: "localhost"
+pg_read_host_core: "db"
+pg_port_core: 5432
+pg_user_core: "holistic_user"
+pg_dbname_core: "holistic_db"
+pg_schema_core: "theta_ai"
+pg_encryption_key: "61df425f-2e57-4798-96be-bb2ac3cebba4"
